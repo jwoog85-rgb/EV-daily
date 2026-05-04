@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#09090b" />
+  <title>EV.Daily — 전기차 뉴스</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet"
+  />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: 'DM Sans', system-ui, sans-serif; background: #09090b; }
+    .font-serif { font-family: 'Fraunces', Georgia, serif; font-optical-sizing: auto; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { animation: spin 0.8s linear infinite; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel" data-presets="react">
+    const { useState, useEffect } = React;
+
+    const COUNTRIES = [
+      { key: 'korea', label: '한국', sub: 'KR' },
+      { key: 'japan', label: '일본', sub: 'JP' },
+      { key: 'us', label: '미국', sub: 'US' },
+    ];
+
+    function formatRelativeTime(dateStr) {
+      if (!dateStr) return '';
+      const date = new Date(dateStr);
+      const diff = (Date.now() - date.getTime()) / 1000;
+      if (isNaN(diff)) return '';
+      if (diff < 60) return '방금 전';
+      if (diff < 3600) return `${Math.floor(diff / 60)}분 전`;
+      if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`;
+      return `${Math.floor(diff / 86400)}일 전`;
+    }
+
+    function EVNewsApp() {
+      const [country, setCountry] = useState('korea');
+      const [cache, setCache] = useState({});
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState(null);
+      const [bookmarks, setBookmarks] = useState(new Set());
+
+      const today = new Date().toLocaleDateString('ko-KR', {
+        year: 'numeric', month: 'long', day: 'numeric', weekday: 'long',
+      });
+
+      async function loadNews(targetCountry, force = false) {
+        if (!force && cache[targetCountry]) return;
+        setLoading(true);
+        setError(null);
+        try {
+          const res = await fetch(`/api/news?country=${targetCountry}`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          setCache((prev) => ({ ...prev, [targetCountry]: data.items || [] }));
+        } catch (e) {
+          setError(e.message);
+        } finally {
+          setLoading(false);
+        }
+      }
+
+      useEffect(() => { loadNews(country); }, [country]);
+
+      const toggleBookmark = (id) => {
+        setBookmarks((prev) => {
+          const next = new Set(prev);
+          if (next.has(id)) next.delete(id); else next.add(id);
+          return next;
+        });
+      };
+
+      const items = cache[country] || [];
+      const feed = COUNTRIES.find((c) => c.key === country);
+
+      return (
+        <div className="min-h-screen bg-zinc-950 text-zinc-100">
+          <div className="max-w-md mx-auto">
+            <header className="px-5 pt-8 pb-5 border-b border-zinc-800">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-lime-400 animate-pulse"></div>
+                  <span className="font-mono text-[10px] tracking-widest text-lime-400 uppercase">Daily</span>
+                </div>
+                <img
+                  src="/logo.png"
+                  alt="GLISIS Global Solution"
+                  className="h-7 w-auto opacity-90"
+                  style={{ filter: 'brightness(0) invert(1)' }}
+                />
+              </div>
+              <h1 className="font-serif text-4xl font-bold tracking-tight leading-none">
+                EV<span className="text-lime-400">.</span>Daily
+              </h1>
+              <p className="mt-2 text-sm text-zinc-400">
+                전기차 시장의 모든 것, 매일 아침
+                <span className="block mt-0.5 font-mono text-[10px] text-zinc-600 uppercase tracking-wider">{today}</span>
+              </p>
+            </header>
+
+            <div className="px-5 pt-4 pb-3 border-b border-zinc-900">
+              <div className="grid grid-cols-3 gap-1 bg-zinc-900 rounded-xl p-1">
+                {COUNTRIES.map((f) => (
+                  <button
+                    key={f.key}
+                    onClick={() => setCountry(f.key)}
+                    className={`py-2.5 rounded-lg text-sm font-semibold transition-all ${
+                      country === f.key ? 'bg-lime-400 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    <div>{f.label}</div>
+                    <div className="font-mono text-[9px] tracking-widest opacity-60 mt-0.5">{f.sub}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="px-5 py-3 flex items-center justify-between text-[11px] font-mono uppercase tracking-wider text-zinc-500 border-b border-zinc-900">
+              <span>{loading ? '불러오는 중...' : `${items.length}건 · ${feed.label}`}</span>
+              <button
+                onClick={() => loadNews(country, true)}
+                disabled={loading}
+                className="text-lime-400 hover:text-lime-300 disabled:opacity-50"
+              >↻ 새로고침</button>
+            </div>
+
+            {loading && items.length === 0 && (
+              <div className="py-20 flex flex-col items-center gap-3">
+                <div className="w-6 h-6 border-2 border-zinc-800 border-t-lime-400 rounded-full spinner"></div>
+                <p className="text-xs text-zinc-500 font-mono uppercase tracking-wider">Loading</p>
+              </div>
+            )}
+
+            {error && !loading && (
+              <div className="mx-5 my-6 p-4 border border-red-900/50 bg-red-950/30 rounded-lg">
+                <p className="text-sm text-red-400 mb-2">불러오기 실패</p>
+                <p className="text-xs text-zinc-500 font-mono">{error}</p>
+                <button onClick={() => loadNews(country, true)} className="mt-3 text-xs px-3 py-1.5 rounded-full bg-zinc-900 border border-zinc-800">다시 시도</button>
+              </div>
+            )}
+
+            {!loading && !error && items.length === 0 && (
+              <div className="py-16 px-5 text-center">
+                <p className="text-sm text-zinc-400 mb-2">아직 데이터가 없어요</p>
+                <p className="text-xs text-zinc-500">cron job을 실행하거나 매일 아침 6시까지 기다려주세요</p>
+              </div>
+            )}
+
+            {!loading && items.length > 0 && (
+              <main className="divide-y divide-zinc-900">
+                {items.map((news) => (
+                  <article key={news.id} className="px-5 py-6 hover:bg-zinc-900/40 transition-colors">
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-wider min-w-0">
+                        <span className="text-lime-400 truncate">{news.category || 'EV'}</span>
+                      </div>
+                      <span className="font-mono text-[10px] text-zinc-600 whitespace-nowrap">{formatRelativeTime(news.pub_date)}</span>
+                    </div>
+
+                    <h2 className="font-serif text-[19px] leading-snug font-semibold mb-3 text-zinc-50">
+                      {news.title}
+                    </h2>
+
+                    <p className="text-[13.5px] text-zinc-300 leading-relaxed mb-4">
+                      {news.summary}
+                    </p>
+
+                    <div className="flex items-center justify-between gap-3 pt-3 border-t border-zinc-900">
+                      <a
+                        href={news.source_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 text-xs text-zinc-500 hover:text-lime-400 transition-colors min-w-0"
+                      >
+                        <span className="font-mono uppercase tracking-wider text-[10px] shrink-0">참조</span>
+                        <span className="truncate">{news.source} ↗</span>
+                      </a>
+
+                      <button
+                        onClick={() => toggleBookmark(news.id)}
+                        className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-all shrink-0 ${
+                          bookmarks.has(news.id) ? 'border-lime-400 bg-lime-400/10 text-lime-400' : 'border-zinc-800 text-zinc-500 hover:border-zinc-700'
+                        }`}
+                      >{bookmarks.has(news.id) ? '★' : '☆'}</button>
+                    </div>
+                  </article>
+                ))}
+              </main>
+            )}
+
+            <footer className="px-5 py-8 text-center border-t border-zinc-900">
+              <p className="font-mono text-[10px] tracking-widest text-zinc-600 uppercase">Updated daily by Claude AI</p>
+              <p className="mt-2 text-[10px] text-zinc-700">EV.Daily · 매일 새벽 6시 자동 업데이트</p>
+            </footer>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<EVNewsApp />);
+  </script>
+</body>
+</html>

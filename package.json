@@ -1,0 +1,14 @@
+{
+  "name": "ev-daily",
+  "version": "1.0.0",
+  "description": "EV Daily - 한국/일본/미국 전기차 뉴스 자동 요약 앱",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@supabase/supabase-js": "^2.45.4",
+    "rss-parser": "^3.13.0"
+  }
+}
