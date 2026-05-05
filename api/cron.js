@@ -2,6 +2,8 @@ import Parser from 'rss-parser';
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
 
+export const config = { maxDuration: 60 };
+
 const parser = new Parser({ timeout: 15000 });
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const supabase = createClient(
