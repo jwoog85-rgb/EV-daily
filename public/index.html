@@ -36,6 +36,8 @@
       { key: 'us', label: '미국', sub: 'US' },
     ];
 
+    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
     function formatRelativeTime(dateStr) {
       if (!dateStr) return '';
       const date = new Date(dateStr);
@@ -76,6 +78,7 @@
       const [loading, setLoading] = useState(false);
       const [error, setError] = useState(null);
       const [bookmarks, setBookmarks] = useState(new Set());
+      const [showDownloadMenu, setShowDownloadMenu] = useState(false);
 
       const today = new Date().toLocaleDateString('ko-KR', {
         year: 'numeric', month: 'long', day: 'numeric', weekday: 'long',
@@ -99,6 +102,17 @@
 
       useEffect(() => { loadNews(country); }, [country]);
 
+      // Close download menu when clicking outside
+      useEffect(() => {
+        if (!showDownloadMenu) return;
+        const handler = () => setShowDownloadMenu(false);
+        const t = setTimeout(() => document.addEventListener('click', handler), 0);
+        return () => {
+          clearTimeout(t);
+          document.removeEventListener('click', handler);
+        };
+      }, [showDownloadMenu]);
+
       const toggleBookmark = (id) => {
         setBookmarks((prev) => {
           const next = new Set(prev);
@@ -107,7 +121,17 @@
         });
       };
 
-      const items = cache[country] || [];
+      const handleDownload = (range) => {
+        window.location.href = `/api/export?range=${range}`;
+        setShowDownloadMenu(false);
+      };
+
+      const allItems = cache[country] || [];
+      // Filter to last 7 days for display
+      const items = allItems.filter((n) => {
+        if (!n.pub_date) return true;
+        return Date.now() - new Date(n.pub_date).getTime() < SEVEN_DAYS_MS;
+      });
       const feed = COUNTRIES.find((c) => c.key === country);
 
       return (
@@ -153,12 +177,49 @@
             </div>
 
             <div className="px-5 py-3 flex items-center justify-between text-[11px] font-mono uppercase tracking-wider text-zinc-500 border-b border-zinc-900">
-              <span>{loading ? '불러오는 중...' : `${items.length}건 · ${feed.label}`}</span>
-              <button
-                onClick={() => loadNews(country, true)}
-                disabled={loading}
-                className="text-lime-400 hover:text-lime-300 disabled:opacity-50"
-              >↻ 새로고침</button>
+              <span>{loading ? '불러오는 중...' : `${items.length}건 · 최근 7일`}</span>
+              <div className="flex items-center gap-3 relative">
+                <button
+                  onClick={() => loadNews(country, true)}
+                  disabled={loading}
+                  className="text-lime-400 hover:text-lime-300 disabled:opacity-50"
+                >↻ 새로고침</button>
+
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowDownloadMenu((v) => !v); }}
+                  className="text-zinc-400 hover:text-lime-400 transition-colors"
+                  title="엑셀 다운로드"
+                >📥 엑셀</button>
+
+                {showDownloadMenu && (
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    className="absolute right-0 top-7 z-10 w-44 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden"
+                  >
+                    <button
+                      onClick={() => handleDownload('week')}
+                      className="w-full px-4 py-3 text-left text-xs font-medium text-zinc-200 hover:bg-zinc-800 normal-case tracking-normal"
+                    >
+                      <div className="text-zinc-100">이번 주</div>
+                      <div className="text-[10px] text-zinc-500 mt-0.5">최근 7일치</div>
+                    </button>
+                    <button
+                      onClick={() => handleDownload('month')}
+                      className="w-full px-4 py-3 text-left text-xs font-medium text-zinc-200 hover:bg-zinc-800 normal-case tracking-normal border-t border-zinc-800"
+                    >
+                      <div className="text-zinc-100">이번 달</div>
+                      <div className="text-[10px] text-zinc-500 mt-0.5">최근 30일치</div>
+                    </button>
+                    <button
+                      onClick={() => handleDownload('all')}
+                      className="w-full px-4 py-3 text-left text-xs font-medium text-zinc-200 hover:bg-zinc-800 normal-case tracking-normal border-t border-zinc-800"
+                    >
+                      <div className="text-zinc-100">전체</div>
+                      <div className="text-[10px] text-zinc-500 mt-0.5">DB 전체 아카이브</div>
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
 
             {loading && items.length === 0 && (
@@ -178,8 +239,8 @@
 
             {!loading && !error && items.length === 0 && (
               <div className="py-16 px-5 text-center">
-                <p className="text-sm text-zinc-400 mb-2">아직 데이터가 없어요</p>
-                <p className="text-xs text-zinc-500">cron job을 실행하거나 매일 아침 6시까지 기다려주세요</p>
+                <p className="text-sm text-zinc-400 mb-2">최근 7일 이내 뉴스가 없어요</p>
+                <p className="text-xs text-zinc-500">cron이 실행되면 자동으로 채워집니다</p>
               </div>
             )}
 
