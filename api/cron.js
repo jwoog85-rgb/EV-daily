@@ -11,21 +11,43 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
+function buildGoogleNewsUrl(sites, keywords, locale) {
+  const sitesQuery = sites.map((s) => `site:${s}`).join(' OR ');
+  const fullQuery = `(${sitesQuery}) (${keywords})`;
+  return `https://news.google.com/rss/search?q=${encodeURIComponent(fullQuery)}&${locale}`;
+}
+
 const FEEDS = {
   korea: {
     lang: 'ko',
     langName: 'Korean',
     urls: [
-      'https://news.google.com/rss/search?q=%EC%A0%84%EA%B8%B0%EC%B0%A8&hl=ko&gl=KR&ceid=KR:ko',
-      'https://news.google.com/rss/search?q=EV+%EB%B0%B0%ED%84%B0%EB%A6%AC&hl=ko&gl=KR&ceid=KR:ko',
+      buildGoogleNewsUrl(
+        ['etnews.com', 'hankyung.com', 'mk.co.kr', 'mt.co.kr', 'biz.chosun.com'],
+        '전기차 OR EV OR 배터리 OR 충전',
+        'hl=ko&gl=KR&ceid=KR:ko'
+      ),
+      buildGoogleNewsUrl(
+        ['edaily.co.kr', 'fnnews.com', 'sedaily.com', 'thebell.co.kr'],
+        '전기차 OR EV OR 배터리',
+        'hl=ko&gl=KR&ceid=KR:ko'
+      ),
     ],
   },
   japan: {
     lang: 'ja',
     langName: 'Japanese',
     urls: [
-      'https://news.google.com/rss/search?q=%E9%9B%BB%E6%B0%97%E8%87%AA%E5%8B%95%E8%BB%8A&hl=ja&gl=JP&ceid=JP:ja',
-      'https://news.google.com/rss/search?q=EV+%E3%83%90%E3%83%83%E3%83%86%E3%83%AA%E3%83%BC&hl=ja&gl=JP&ceid=JP:ja',
+      buildGoogleNewsUrl(
+        ['response.jp', 'car.watch.impress.co.jp', 'nikkei.com', 'itmedia.co.jp'],
+        '電気自動車 OR EV OR バッテリー OR 充電',
+        'hl=ja&gl=JP&ceid=JP:ja'
+      ),
+      buildGoogleNewsUrl(
+        ['carview.yahoo.co.jp', 'autocar.jp', 'kuruma-news.jp', 'webcg.net'],
+        '電気自動車 OR EV OR バッテリー',
+        'hl=ja&gl=JP&ceid=JP:ja'
+      ),
     ],
   },
   us: {
@@ -34,7 +56,12 @@ const FEEDS = {
     urls: [
       'https://electrek.co/feed/',
       'https://insideevs.com/rss/articles/all/',
-      'https://news.google.com/rss/search?q=electric+vehicle+OR+EV&hl=en&gl=US&ceid=US:en',
+      'https://cleantechnica.com/feed/',
+      buildGoogleNewsUrl(
+        ['theverge.com', 'reuters.com', 'bloomberg.com', 'wsj.com', 'cnbc.com'],
+        'electric vehicle OR EV OR battery',
+        'hl=en&gl=US&ceid=US:en'
+      ),
     ],
   },
 };
@@ -53,16 +80,20 @@ function cleanTitle(title) {
 async function fetchFeeds(urls) {
   const results = await Promise.allSettled(urls.map((u) => parser.parseURL(u)));
   const items = [];
-  results.forEach((r) => {
-    if (r.status === 'fulfilled') items.push(...r.value.items);
+  results.forEach((r, idx) => {
+    if (r.status === 'fulfilled') {
+      items.push(...r.value.items);
+    } else {
+      console.warn(`feed ${idx} failed:`, r.reason?.message || r.reason);
+    }
   });
   return items;
 }
 
 async function processCountry(country) {
-  const config = FEEDS[country];
+  const conf = FEEDS[country];
   console.log(`[${country}] fetching feeds...`);
-  const rawItems = await fetchFeeds(config.urls);
+  const rawItems = await fetchFeeds(conf.urls);
   console.log(`[${country}] got ${rawItems.length} raw items`);
 
   if (rawItems.length === 0) return { country, saved: 0 };
@@ -72,7 +103,6 @@ async function processCountry(country) {
       new Date(b.pubDate || b.isoDate || 0) - new Date(a.pubDate || a.isoDate || 0)
   );
 
-  // Dedupe by link (same article can appear in multiple feeds)
   const seen = new Set();
   const deduped = rawItems.filter((item) => {
     const key = item.link;
@@ -87,32 +117,38 @@ async function processCountry(country) {
     .map((item, i) => {
       const desc = (item.contentSnippet || item.content || '')
         .replace(/<[^>]+>/g, '')
-        .slice(0, 300);
+        .slice(0, 400);
       return `${i + 1}. TITLE: ${cleanTitle(item.title)}\n   DESC: ${desc}`;
     })
     .join('\n\n');
 
-  const prompt = `You are processing ${config.langName} EV/automotive news for a Korean news app.
+  const prompt = `You are processing ${conf.langName} EV/automotive news for a Korean news app and analytical archive.
 
 For each numbered item, output:
 - title_ko: Concise Korean title (translate if needed; if already Korean, polish)
-- summary_ko: Exactly 2 Korean sentences capturing the key facts and implication
+- summary_ko: Exactly 2 Korean sentences capturing the key facts (for quick scanning on the website)
+- summary_long_ko: Exactly 4 Korean sentences providing deeper analysis (for archival/research):
+  Sentence 1: Core fact - what happened
+  Sentence 2: Specific details, numbers, or technical specs mentioned
+  Sentence 3: Market context - related companies, competing products, or industry trend
+  Sentence 4: Implication - why this matters for the EV industry going forward
 - category: ONE of: ${CATEGORIES.join(' / ')}
 
 Rules:
 - Keep brand/company/people names in original Latin form (Tesla, Toyota, Hyundai, BYD, Rivian, etc.)
 - Convert Japanese katakana brand names to Latin (テスラ → Tesla)
 - Korean must be natural, news-style, not literal translation
-- 2 sentences exactly, no more no less
+- summary_ko: 2 sentences exactly. summary_long_ko: 4 sentences exactly.
+- For summary_long_ko, draw on your knowledge of the EV industry to add useful context
 
 Items:
 ${itemsText}
 
-Output a JSON array of exactly ${top.length} objects with keys (title_ko, summary_ko, category) in the same order. No markdown, no explanation.`;
+Output a JSON array of exactly ${top.length} objects with keys (title_ko, summary_ko, summary_long_ko, category) in the same order. No markdown, no explanation.`;
 
   const message = await anthropic.messages.create({
     model: 'claude-haiku-4-5',
-    max_tokens: 3000,
+    max_tokens: 6000,
     system: 'You output ONLY a valid JSON array. No code fences, no preamble, no explanation.',
     messages: [{ role: 'user', content: prompt }],
   });
@@ -134,6 +170,7 @@ Output a JSON array of exactly ${top.length} objects with keys (title_ko, summar
         country,
         title: p.title_ko,
         summary: p.summary_ko,
+        summary_long: p.summary_long_ko,
         category: p.category,
         source: extractSource(item.title) || item.creator || new URL(item.link).hostname,
         source_url: item.link,
