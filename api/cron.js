@@ -157,6 +157,11 @@ export default async function handler(req, res) {
   }
 
   try {
+    console.log('=== ENV CHECK ===');
+    console.log('ANTHROPIC_API_KEY exists:', !!process.env.ANTHROPIC_API_KEY);
+    console.log('ANTHROPIC_API_KEY length:', process.env.ANTHROPIC_API_KEY?.length || 0);
+    console.log('ANTHROPIC_API_KEY prefix:', process.env.ANTHROPIC_API_KEY?.slice(0, 10) || 'EMPTY');
+    
     const results = await Promise.allSettled([
       processCountry('korea'),
       processCountry('japan'),
