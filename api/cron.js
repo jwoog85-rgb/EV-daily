@@ -47,7 +47,6 @@ function extractSource(title) {
 }
 
 function cleanTitle(title) {
-  // Strip " - SourceName" suffix from Google News titles
   return title.replace(/ - [^-]{2,40}$/, '').trim();
 }
 
@@ -68,19 +67,17 @@ async function processCountry(country) {
 
   if (rawItems.length === 0) return { country, saved: 0 };
 
-  // Sort by date desc, take top 12
   rawItems.sort(
     (a, b) =>
       new Date(b.pubDate || b.isoDate || 0) - new Date(a.pubDate || a.isoDate || 0)
   );
   const top = rawItems.slice(0, 8);
 
-  // Build prompt for Claude
   const itemsText = top
     .map((item, i) => {
       const desc = (item.contentSnippet || item.content || '')
         .replace(/<[^>]+>/g, '')
-        .slice(0, 400);
+        .slice(0, 300);
       return `${i + 1}. TITLE: ${cleanTitle(item.title)}\n   DESC: ${desc}`;
     })
     .join('\n\n');
@@ -103,26 +100,25 @@ ${itemsText}
 
 Output a JSON array of exactly ${top.length} objects with keys (title_ko, summary_ko, category) in the same order. No markdown, no explanation.`;
 
-  console.log(`[${country}] calling Claude...`);
+  console.log(`[${country}] sending ${top.length} headlines to Claude`);
+
   const message = await anthropic.messages.create({
     model: 'claude-haiku-4-5',
-    max_tokens: 4000,
+    max_tokens: 3000,
     system: 'You output ONLY a valid JSON array. No code fences, no preamble, no explanation.',
     messages: [{ role: 'user', content: prompt }],
   });
-console.log(`[${country}] sending ${top.length} headlines to Claude`);
-  
+
   const text = message.content[0].text.replace(/```json/gi, '').replace(/```/g, '').trim();
   let processed;
   try {
     processed = JSON.parse(text);
   } catch (e) {
-    console.error(`[${country}] JSON parse failed:`, text.slice(0, 200));
+    console.error(`[${country}] JSON parse failed. Response preview:`, text.slice(0, 300));
     throw e;
   }
-console.log(`[${country}] Claude returned ${processed.length} processed items`);
-  
-  // Build records
+  console.log(`[${country}] Claude returned ${processed.length} processed items`);
+
   const records = top
     .map((item, i) => {
       const p = processed[i];
@@ -150,11 +146,11 @@ console.log(`[${country}] Claude returned ${processed.length} processed items`);
     throw new Error(error.message);
   }
 
+  console.log(`[${country}] done!`);
   return { country, saved: records.length };
 }
 
 export default async function handler(req, res) {
-  // Auth: only allow Vercel cron or manual call with secret
   const authHeader = req.headers.authorization;
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -173,6 +169,7 @@ export default async function handler(req, res) {
       return { country, error: r.reason?.message || 'unknown error' };
     });
 
+    console.log('Final summary:', JSON.stringify(summary));
     res.status(200).json({
       ok: true,
       time: new Date().toISOString(),
@@ -182,6 +179,5 @@ export default async function handler(req, res) {
     console.error('Cron failed:', e);
     console.error('Stack:', e.stack);
     res.status(500).json({ error: e.message, stack: e.stack });
-  }
   }
 }
