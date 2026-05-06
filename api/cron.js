@@ -71,7 +71,18 @@ async function processCountry(country) {
     (a, b) =>
       new Date(b.pubDate || b.isoDate || 0) - new Date(a.pubDate || a.isoDate || 0)
   );
-  const top = rawItems.slice(0, 8);
+
+  // Dedupe by link (same article can appear in multiple feeds)
+  const seen = new Set();
+  const deduped = rawItems.filter((item) => {
+    const key = item.link;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  console.log(`[${country}] ${deduped.length} unique items after dedup`);
+
+  const top = deduped.slice(0, 8);
 
   const itemsText = top
     .map((item, i) => {
