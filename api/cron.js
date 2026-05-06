@@ -80,7 +80,6 @@ async function processCountry(country) {
     seen.add(key);
     return true;
   });
-  console.log(`[${country}] ${deduped.length} unique items after dedup`);
 
   const top = deduped.slice(0, 8);
 
@@ -111,8 +110,6 @@ ${itemsText}
 
 Output a JSON array of exactly ${top.length} objects with keys (title_ko, summary_ko, category) in the same order. No markdown, no explanation.`;
 
-  console.log(`[${country}] sending ${top.length} headlines to Claude`);
-
   const message = await anthropic.messages.create({
     model: 'claude-haiku-4-5',
     max_tokens: 3000,
@@ -128,7 +125,6 @@ Output a JSON array of exactly ${top.length} objects with keys (title_ko, summar
     console.error(`[${country}] JSON parse failed. Response preview:`, text.slice(0, 300));
     throw e;
   }
-  console.log(`[${country}] Claude returned ${processed.length} processed items`);
 
   const records = top
     .map((item, i) => {
@@ -147,7 +143,6 @@ Output a JSON array of exactly ${top.length} objects with keys (title_ko, summar
     })
     .filter(Boolean);
 
-  console.log(`[${country}] upserting ${records.length} records...`);
   const { error } = await supabase
     .from('news')
     .upsert(records, { onConflict: 'source_url', ignoreDuplicates: false });
@@ -157,7 +152,7 @@ Output a JSON array of exactly ${top.length} objects with keys (title_ko, summar
     throw new Error(error.message);
   }
 
-  console.log(`[${country}] done!`);
+  console.log(`[${country}] saved ${records.length} records`);
   return { country, saved: records.length };
 }
 
@@ -168,14 +163,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    console.log('=== ENV CHECK ===');
-    console.log('ANTHROPIC_API_KEY exists:', !!process.env.ANTHROPIC_API_KEY);
-    console.log('ANTHROPIC_API_KEY length:', process.env.ANTHROPIC_API_KEY?.length || 0);
-    console.log('ANTHROPIC_API_KEY prefix:', process.env.ANTHROPIC_API_KEY?.slice(0, 10) || 'EMPTY');
-
-    console.log('SUPABASE_URL:', process.env.SUPABASE_URL || 'EMPTY');
-    console.log('SUPABASE_SERVICE_KEY length:', process.env.SUPABASE_SERVICE_KEY?.length || 0);
-    
     const results = await Promise.allSettled([
       processCountry('korea'),
       processCountry('japan'),
@@ -188,7 +175,7 @@ export default async function handler(req, res) {
       return { country, error: r.reason?.message || 'unknown error' };
     });
 
-    console.log('Final summary:', JSON.stringify(summary));
+    console.log('Cron run summary:', JSON.stringify(summary));
     res.status(200).json({
       ok: true,
       time: new Date().toISOString(),
@@ -196,7 +183,6 @@ export default async function handler(req, res) {
     });
   } catch (e) {
     console.error('Cron failed:', e);
-    console.error('Stack:', e.stack);
-    res.status(500).json({ error: e.message, stack: e.stack });
+    res.status(500).json({ error: e.message });
   }
 }
