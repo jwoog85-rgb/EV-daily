@@ -73,7 +73,7 @@ async function processCountry(country) {
     (a, b) =>
       new Date(b.pubDate || b.isoDate || 0) - new Date(a.pubDate || a.isoDate || 0)
   );
-  const top = rawItems.slice(0, 12);
+  const top = rawItems.slice(0, 8);
 
   // Build prompt for Claude
   const itemsText = top
@@ -105,12 +105,13 @@ Output a JSON array of exactly ${top.length} objects with keys (title_ko, summar
 
   console.log(`[${country}] calling Claude...`);
   const message = await anthropic.messages.create({
-    model: 'claude-sonnet-4-5',
+    model: 'claude-haiku-4-5',
     max_tokens: 4000,
     system: 'You output ONLY a valid JSON array. No code fences, no preamble, no explanation.',
     messages: [{ role: 'user', content: prompt }],
   });
-
+console.log(`[${country}] sending ${top.length} headlines to Claude`);
+  
   const text = message.content[0].text.replace(/```json/gi, '').replace(/```/g, '').trim();
   let processed;
   try {
@@ -119,7 +120,8 @@ Output a JSON array of exactly ${top.length} objects with keys (title_ko, summar
     console.error(`[${country}] JSON parse failed:`, text.slice(0, 200));
     throw e;
   }
-
+console.log(`[${country}] Claude returned ${processed.length} processed items`);
+  
   // Build records
   const records = top
     .map((item, i) => {
@@ -178,6 +180,8 @@ export default async function handler(req, res) {
     });
   } catch (e) {
     console.error('Cron failed:', e);
-    res.status(500).json({ error: e.message });
+    console.error('Stack:', e.stack);
+    res.status(500).json({ error: e.message, stack: e.stack });
+  }
   }
 }
