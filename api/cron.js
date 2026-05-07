@@ -20,9 +20,7 @@ function buildSiteFiltered(sites, keywords, locale) {
   return buildGoogleNewsUrl(`(${sitesQuery}) (${keywords})`, locale);
 }
 
-// ===== Sector configs =====
-
-// EV sector — same as before
+// ===== EV sector =====
 const EV_FEEDS = {
   korea: {
     lang: 'ko', langName: 'Korean',
@@ -64,11 +62,10 @@ const EV_FEEDS = {
   },
 };
 
-// CPO sector — Charging Point Operator companies
+// ===== CPO sector =====
 const CPO_FEEDS = {
   korea: {
     lang: 'ko', langName: 'Korean',
-    // Step 1: company-name searches (priority)
     urls: [
       buildGoogleNewsUrl(
         '"GS차지비" OR "채비" OR "파워큐브" OR "에버온" OR "SK일렉링크" OR "이브이시스" OR "EVSIS" OR "한국전기차충전서비스" OR "볼트업"',
@@ -102,8 +99,52 @@ const CPO_FEEDS = {
   },
 };
 
+// ===== Tech sector (global, English-language) =====
+const TECH_FEEDS = {
+  global: {
+    lang: 'en', langName: 'English',
+    urls: [
+      // Direct EV-tech publications
+      'https://electrek.co/feed/',
+      'https://insideevs.com/rss/articles/all/',
+      'https://cleantechnica.com/feed/',
+      // Charging tech keywords
+      buildGoogleNewsUrl(
+        '"350kW charger" OR "1MW charging" OR "megawatt charging" OR "MCS" charging OR "ultra-fast charging"',
+        'hl=en&gl=US&ceid=US:en'),
+      // Wireless + V2X
+      buildGoogleNewsUrl(
+        '"wireless EV charging" OR "inductive charging" OR "V2G" OR "V2H" OR "V2X" OR "vehicle-to-grid"',
+        'hl=en&gl=US&ceid=US:en'),
+      // Standards + AI
+      buildGoogleNewsUrl(
+        '"NACS" charging OR "OCPP" OR "ISO 15118" OR "Plug and Charge" OR "AI charging management" OR "smart charging"',
+        'hl=en&gl=US&ceid=US:en'),
+      // Battery tech (charging-relevant)
+      buildGoogleNewsUrl(
+        '"solid-state battery" OR "4680 cell" OR "LFP battery" OR "silicon anode" OR "fast charging battery"',
+        'hl=en&gl=US&ceid=US:en'),
+    ],
+  },
+};
+
+// ===== Categories =====
 const EV_CATEGORIES = ['국내 완성차', '해외 완성차', '배터리', '충전 인프라', '정책', '시장 동향'];
 const CPO_CATEGORIES = ['사업 확장', '기술·제품', '제휴·파트너십', '요금·서비스', '투자·M&A', '정책·규제'];
+const TECH_CATEGORIES = ['신기술 발표', '상용화·시장 침투', '표준·규격', 'R&D·연구', '제품 출시', '특허·논문'];
+
+// Tech tag definitions (for filtering on the tech page)
+const TECH_TAGS = ['fast_charging', 'mcs', 'wireless', 'v2x', 'standard', 'ai_management', 'payment', 'battery'];
+const TECH_TAG_LABELS = {
+  fast_charging: '초급속 충전',
+  mcs: 'MCS (메가와트 충전)',
+  wireless: '무선 충전',
+  v2x: 'V2G·V2H·V2X',
+  standard: '충전 표준·프로토콜',
+  ai_management: 'AI 충전 관리',
+  payment: '결제·인증',
+  battery: '배터리 기술',
+};
 
 function extractSource(title) {
   const m = title.match(/ - ([^-]{2,40})$/);
@@ -127,7 +168,7 @@ async function fetchFeeds(urls) {
   return items;
 }
 
-async function processSegment(sector, country, feedsConfig, categories, sectorContext) {
+async function processSegment(sector, country, feedsConfig, categories, sectorContext, includeTechTag = false) {
   const conf = feedsConfig[country];
   console.log(`[${sector}/${country}] fetching feeds...`);
   const rawItems = await fetchFeeds(conf.urls);
@@ -140,7 +181,6 @@ async function processSegment(sector, country, feedsConfig, categories, sectorCo
       new Date(b.pubDate || b.isoDate || 0) - new Date(a.pubDate || a.isoDate || 0)
   );
 
-  // Dedupe by link
   const seen = new Set();
   const deduped = rawItems.filter((item) => {
     const key = item.link;
@@ -161,6 +201,21 @@ async function processSegment(sector, country, feedsConfig, categories, sectorCo
     })
     .join('\n\n');
 
+  // Extra instruction for tech sector to include a tech_tag
+  const techTagInstruction = includeTechTag ? `
+- tech_tag: ONE of: ${TECH_TAGS.join(' / ')}
+  Mapping guide:
+  * fast_charging: 350kW+ ultra-fast charging, high-power charging stations
+  * mcs: Megawatt Charging System, truck/bus 1MW+ charging
+  * wireless: Inductive/wireless EV charging
+  * v2x: V2G, V2H, V2X, bidirectional charging, vehicle-to-grid
+  * standard: NACS, CCS, OCPP, ISO 15118, Plug and Charge, charging protocols
+  * ai_management: AI/smart charging management, load balancing, predictive maintenance
+  * payment: Payment/authentication tech, RFID, mobile payment, roaming
+  * battery: Battery tech (solid-state, 4680, LFP, silicon anode) — only when directly relevant to charging` : '';
+
+  const techTagKeyHint = includeTechTag ? ', tech_tag' : '';
+
   const prompt = `You are processing ${conf.langName} ${sectorContext} news for a Korean news app and analytical archive.
 
 For each numbered item, output:
@@ -171,7 +226,7 @@ For each numbered item, output:
   Sentence 2: Specific details, numbers, or technical specs mentioned
   Sentence 3: Market context - related companies, competing products, or industry trend
   Sentence 4: Implication - why this matters for the industry going forward
-- category: ONE of: ${categories.join(' / ')}
+- category: ONE of: ${categories.join(' / ')}${techTagInstruction}
 
 Rules:
 - Keep brand/company/people names in original Latin form (Tesla, Toyota, ChargePoint, EVgo, etc.)
@@ -182,7 +237,7 @@ Rules:
 Items:
 ${itemsText}
 
-Output a JSON array of exactly ${top.length} objects with keys (title_ko, summary_ko, summary_long_ko, category) in the same order. No markdown, no explanation.`;
+Output a JSON array of exactly ${top.length} objects with keys (title_ko, summary_ko, summary_long_ko, category${techTagKeyHint}) in the same order. No markdown, no explanation.`;
 
   const message = await anthropic.messages.create({
     model: 'claude-haiku-4-5',
@@ -204,7 +259,7 @@ Output a JSON array of exactly ${top.length} objects with keys (title_ko, summar
     .map((item, i) => {
       const p = processed[i];
       if (!p) return null;
-      return {
+      const record = {
         sector,
         country,
         title: p.title_ko,
@@ -216,6 +271,10 @@ Output a JSON array of exactly ${top.length} objects with keys (title_ko, summar
         pub_date: item.pubDate || item.isoDate || new Date().toISOString(),
         original_title: cleanTitle(item.title),
       };
+      if (includeTechTag && p.tech_tag && TECH_TAGS.includes(p.tech_tag)) {
+        record.tech_tag = p.tech_tag;
+      }
+      return record;
     })
     .filter(Boolean);
 
@@ -240,24 +299,38 @@ export default async function handler(req, res) {
 
   try {
     const tasks = [
-      // EV sector
+      // EV sector — country-specific
       processSegment('ev', 'korea', EV_FEEDS, EV_CATEGORIES, 'EV/automotive'),
       processSegment('ev', 'japan', EV_FEEDS, EV_CATEGORIES, 'EV/automotive'),
       processSegment('ev', 'us', EV_FEEDS, EV_CATEGORIES, 'EV/automotive'),
-      // CPO sector
+      // CPO sector — country-specific
       processSegment('cpo', 'korea', CPO_FEEDS, CPO_CATEGORIES, 'EV charging operator (CPO)'),
       processSegment('cpo', 'japan', CPO_FEEDS, CPO_CATEGORIES, 'EV charging operator (CPO)'),
       processSegment('cpo', 'us', CPO_FEEDS, CPO_CATEGORIES, 'EV charging operator (CPO)'),
+      // Tech sector — global, single task, with tech_tag classification
+      processSegment(
+        'tech', 'global', TECH_FEEDS, TECH_CATEGORIES,
+        'EV charging technology and innovation',
+        true, // includeTechTag
+      ),
     ];
 
     const results = await Promise.allSettled(tasks);
 
+    const meta = [
+      { sector: 'ev', country: 'korea' },
+      { sector: 'ev', country: 'japan' },
+      { sector: 'ev', country: 'us' },
+      { sector: 'cpo', country: 'korea' },
+      { sector: 'cpo', country: 'japan' },
+      { sector: 'cpo', country: 'us' },
+      { sector: 'tech', country: 'global' },
+    ];
+
     const summary = results.map((r, i) => {
-      const sectorList = ['ev', 'ev', 'ev', 'cpo', 'cpo', 'cpo'];
-      const countryList = ['korea', 'japan', 'us', 'korea', 'japan', 'us'];
       if (r.status === 'fulfilled') return r.value;
       return {
-        sector: sectorList[i], country: countryList[i],
+        ...meta[i],
         error: r.reason?.message || 'unknown error',
       };
     });
