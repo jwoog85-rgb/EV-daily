@@ -21,19 +21,44 @@ const COLOR_WHITE = 'FFFFFF';
 
 const FONT = 'Calibri';
 
-// Category → color (hex without #)
-const CATEGORY_COLORS = {
-  '국내 완성차': '005A9C',
-  '해외 완성차': '4F46E5',
-  '배터리':      '8B5CF6',
-  '충전 인프라':  '0D9488',
-  '정책':        'D97706',
-  '시장 동향':    'E11D48',
+// ===== Sector configs =====
+const SECTOR_CONFIG = {
+  ev: {
+    title: 'EV Weekly Report',
+    titleMonth: 'EV Monthly Report',
+    indexTitle: 'All Articles This Week',
+    indexSubtitle: 'Source data — EV market across Korea, Japan, US',
+    contextLabel: 'EV market',
+    categories: ['국내 완성차', '해외 완성차', '배터리', '충전 인프라', '정책', '시장 동향'],
+    categoryColors: {
+      '국내 완성차': '005A9C',
+      '해외 완성차': '4F46E5',
+      '배터리':      '8B5CF6',
+      '충전 인프라':  '0D9488',
+      '정책':        'D97706',
+      '시장 동향':    'E11D48',
+    },
+  },
+  cpo: {
+    title: 'CPO Weekly Report',
+    titleMonth: 'CPO Monthly Report',
+    indexTitle: 'All Articles This Week',
+    indexSubtitle: 'Source data — Charging Point Operators across Korea, Japan, US',
+    contextLabel: 'EV charging operator (CPO) industry',
+    categories: ['사업 확장', '기술·제품', '제휴·파트너십', '요금·서비스', '투자·M&A', '정책·규제'],
+    categoryColors: {
+      '사업 확장':      '005A9C',
+      '기술·제품':      '4F46E5',
+      '제휴·파트너십':   '8B5CF6',
+      '요금·서비스':    '0D9488',
+      '투자·M&A':       'D97706',
+      '정책·규제':      'E11D48',
+    },
+  },
 };
 
 const COUNTRY_LABELS = { korea: '한국', japan: '일본', us: '미국' };
 const COUNTRY_CODES  = { korea: 'KR', japan: 'JP', us: 'US' };
-const CATEGORIES = ['국내 완성차', '해외 완성차', '배터리', '충전 인프라', '정책', '시장 동향'];
 
 // ===== Date helpers =====
 function formatDate(d) {
@@ -42,14 +67,13 @@ function formatDate(d) {
 }
 
 // ===== Claude analysis =====
-async function generateAnalysis(articles, periodLabel) {
-  // Build a compact list for Claude
+async function generateAnalysis(articles, periodLabel, sectorConfig) {
   const articleList = articles.map((a, i) => {
     const country = COUNTRY_LABELS[a.country] || a.country;
     return `${i + 1}. [${country}/${a.category}] ${a.title}\n   ${a.summary_long || a.summary || ''}`;
   }).join('\n\n');
 
-  const prompt = `You are analyzing ${articles.length} EV market news articles from ${periodLabel} for an executive weekly report.
+  const prompt = `You are analyzing ${articles.length} ${sectorConfig.contextLabel} news articles from ${periodLabel} for an executive weekly report.
 
 Articles:
 ${articleList}
@@ -63,12 +87,12 @@ Generate a JSON object with these exact keys:
     "3번째 핵심 하이라이트"
   ],
   "category_picks": {
-    "국내 완성차": <article number>,
-    "해외 완성차": <article number>,
-    "배터리": <article number>,
-    "충전 인프라": <article number>,
-    "정책": <article number>,
-    "시장 동향": <article number>
+    "${sectorConfig.categories[0]}": <article number>,
+    "${sectorConfig.categories[1]}": <article number>,
+    "${sectorConfig.categories[2]}": <article number>,
+    "${sectorConfig.categories[3]}": <article number>,
+    "${sectorConfig.categories[4]}": <article number>,
+    "${sectorConfig.categories[5]}": <article number>
   },
   "implications": [
     {"title": "인사이트 제목", "detail": "2~3 문장 설명. 시장 영향, 관련 업체, 향후 전망 등을 포함."},
@@ -82,7 +106,7 @@ Rules:
 - highlights: pick the 3 most impactful stories of the week. Korean, news-style, concise.
 - category_picks: for EACH of the 6 categories, pick the BEST representative article number (1-${articles.length}). If a category has zero articles, use the closest match.
 - implications: 4 strategic insights synthesized from the week's articles. Korean, professional tone for executives.
-- Korean throughout. Brand names in original Latin form (Tesla, Toyota, etc.)
+- Korean throughout. Brand names in original Latin form (Tesla, ChargePoint, EVgo, etc.)
 - Return ONLY the JSON object. No markdown fences, no preamble.`;
 
   const response = await anthropic.messages.create({
@@ -114,25 +138,21 @@ function addSectionTitle(slide, title) {
   });
 }
 
-function buildTitleSlide(pres, weekStart, weekEnd) {
+function buildTitleSlide(pres, weekStart, weekEnd, reportTitle) {
   const slide = pres.addSlide();
-  // Light gray background panel on the right
   slide.addShape('rect', {
     x: 7.5, y: 0, w: 5.833, h: 7.5,
     fill: { color: COLOR_BG_GRAY }, line: { type: 'none' },
   });
-  // Big logo center-left
   slide.addImage({
     data: GLISIS_LOGO_BASE64,
     x: 1.03, y: 2.47, w: 4.6, h: 1.29,
   });
-  // "EV Weekly Report" right-aligned
-  slide.addText('EV Weekly Report', {
+  slide.addText(reportTitle, {
     x: 2.5, y: 3.9, w: 3.2, h: 0.55,
     fontSize: 24, bold: true, color: COLOR_BLUE, fontFace: FONT,
     align: 'right',
   });
-  // Date range
   slide.addText(`${weekStart} — ${weekEnd}`, {
     x: 2.5, y: 4.55, w: 3.2, h: 0.4,
     fontSize: 15, color: COLOR_GRAY, fontFace: FONT,
@@ -140,12 +160,11 @@ function buildTitleSlide(pres, weekStart, weekEnd) {
   });
 }
 
-function buildExecSummary(pres, stats, highlights) {
+function buildExecSummary(pres, stats, highlights, sectorConfig) {
   const slide = pres.addSlide();
   addLogoTopRight(slide);
   addSectionTitle(slide, 'Executive Summary');
 
-  // Stats cards
   const statsTop = 1.3;
   const leftStart = 0.625;
   const totalCardW = 2.6;
@@ -153,7 +172,6 @@ function buildExecSummary(pres, stats, highlights) {
   const cardH = 1.5;
   const cardGap = 0.25;
 
-  // Total card (blue)
   slide.addShape('rect', {
     x: leftStart, y: statsTop, w: totalCardW, h: cardH,
     fill: { color: COLOR_BLUE }, line: { type: 'none' },
@@ -169,7 +187,6 @@ function buildExecSummary(pres, stats, highlights) {
     align: 'center',
   });
 
-  // Country cards
   const countries = [
     [`${COUNTRY_LABELS.korea} ${COUNTRY_CODES.korea}`, stats.byCountry.korea || 0],
     [`${COUNTRY_LABELS.japan} ${COUNTRY_CODES.japan}`, stats.byCountry.japan || 0],
@@ -194,7 +211,6 @@ function buildExecSummary(pres, stats, highlights) {
     });
   });
 
-  // Category Distribution (left half)
   const catTop = 3.2;
   slide.addText('Category Distribution', {
     x: leftStart, y: catTop, w: 5.0, h: 0.4,
@@ -204,7 +220,7 @@ function buildExecSummary(pres, stats, highlights) {
   const maxCount = Math.max(...Object.values(stats.byCategory), 1);
   const barMaxW = 3.5;
   const rowH = 0.4;
-  CATEGORIES.forEach((cat, i) => {
+  sectorConfig.categories.forEach((cat, i) => {
     const count = stats.byCategory[cat] || 0;
     const y = barTop + rowH * i;
     slide.addText(cat, {
@@ -225,7 +241,6 @@ function buildExecSummary(pres, stats, highlights) {
     });
   });
 
-  // This Week Highlights (right half)
   const hlLeft = 7.0;
   const hlTop = 3.2;
   const hlW = 5.7;
@@ -235,7 +250,6 @@ function buildExecSummary(pres, stats, highlights) {
   });
   highlights.slice(0, 3).forEach((hl, i) => {
     const y = hlTop + 0.55 + 1.05 * i;
-    // Number circle
     slide.addShape('ellipse', {
       x: hlLeft, y, w: 0.36, h: 0.36,
       fill: { color: COLOR_BLUE }, line: { type: 'none' },
@@ -252,12 +266,12 @@ function buildExecSummary(pres, stats, highlights) {
   });
 }
 
-function buildAllArticlesIndex(pres, articlesByCountry) {
+function buildAllArticlesIndex(pres, articlesByCountry, sectorConfig) {
   const slide = pres.addSlide();
   addLogoTopRight(slide);
-  addSectionTitle(slide, 'All Articles This Week');
+  addSectionTitle(slide, sectorConfig.indexTitle);
   const totalCount = Object.values(articlesByCountry).flat().length;
-  slide.addText(`Source data — ${totalCount} articles across Korea, Japan, US`, {
+  slide.addText(`${sectorConfig.indexSubtitle} — ${totalCount} articles`, {
     x: 0.625, y: 0.85, w: 10, h: 0.3,
     fontSize: 11, color: COLOR_GRAY, fontFace: FONT,
   });
@@ -280,7 +294,6 @@ function buildAllArticlesIndex(pres, articlesByCountry) {
     const code = COUNTRY_CODES[countryKey];
     const items = (articlesByCountry[countryKey] || []).slice(0, maxItems);
 
-    // Country header bar
     slide.addShape('rect', {
       x, y: colTop, w: colW, h: headerH,
       fill: { color: COLOR_BLUE }, line: { type: 'none' },
@@ -302,32 +315,27 @@ function buildAllArticlesIndex(pres, articlesByCountry) {
       const innerW = colW - 0.1;
 
       const topY = y + 0.05;
-      const catColor = CATEGORY_COLORS[art.category] || COLOR_GRAY;
+      const catColor = sectorConfig.categoryColors[art.category] || COLOR_GRAY;
 
-      // Color dot
       slide.addShape('ellipse', {
         x: innerX, y: topY + 0.02, w: 0.13, h: 0.13,
         fill: { color: catColor }, line: { type: 'none' },
       });
-      // Category name
       slide.addText(art.category || '', {
         x: innerX + 0.2, y: topY, w: 1.5, h: 0.2,
         fontSize: 8, bold: true, color: catColor, fontFace: FONT,
       });
-      // Source on right
       slide.addText(art.source || '', {
         x: innerX + innerW - 1.5, y: topY, w: 1.5, h: 0.2,
         fontSize: 8, color: COLOR_GRAY, fontFace: FONT,
         align: 'right',
       });
-      // Title (clickable)
       slide.addText(art.title || '', {
         x: innerX, y: topY + 0.22, w: innerW, h: itemH - 0.3,
         fontSize: 9, bold: true, color: COLOR_DARK, fontFace: FONT,
         hyperlink: { url: art.source_url || '' },
         lineSpacingMultiple: 1.18,
       });
-      // Divider line
       if (i < items.length - 1) {
         slide.addShape('rect', {
           x: innerX, y: y + itemH - 0.005, w: innerW, h: 0.005,
@@ -338,8 +346,7 @@ function buildAllArticlesIndex(pres, articlesByCountry) {
   });
 }
 
-function buildKMNGrid(pres, categoryArticles) {
-  // categoryArticles: { category: article } - one per category
+function buildKMNGrid(pres, categoryArticles, sectorConfig) {
   const slide = pres.addSlide();
   addLogoTopRight(slide);
   addSectionTitle(slide, 'Key Market News');
@@ -355,7 +362,7 @@ function buildKMNGrid(pres, categoryArticles) {
   const cellW = (totalW - gapX * (cols - 1)) / cols;
   const cellH = (totalH - gapY * (rows - 1)) / rows;
 
-  CATEGORIES.forEach((cat, i) => {
+  sectorConfig.categories.forEach((cat, i) => {
     const news = categoryArticles[cat];
     if (!news) return;
     const col = i % cols;
@@ -375,13 +382,11 @@ function addKMNCard(slide, news, category, x, y, w, h) {
   const linkSize = Math.round(9 * fontScale);
   const pad = 0.2;
 
-  // Card background
   slide.addShape('rect', {
     x, y, w, h,
     fill: { color: COLOR_WHITE },
     line: { color: COLOR_LIGHT_GRAY, width: 1 },
   });
-  // Left accent bar
   slide.addShape('rect', {
     x, y, w: 0.05, h,
     fill: { color: COLOR_BLUE }, line: { type: 'none' },
@@ -391,7 +396,6 @@ function addKMNCard(slide, news, category, x, y, w, h) {
   const innerX = x + pad + 0.05;
   const innerW = w - pad * 2 - 0.05;
 
-  // Category label
   const catH = 0.24 * fontScale + 0.04;
   slide.addText(category, {
     x: innerX, y: curY, w: innerW, h: catH,
@@ -399,7 +403,6 @@ function addKMNCard(slide, news, category, x, y, w, h) {
   });
   curY += catH + 0.02;
 
-  // Title
   const titleH = 0.5 * fontScale + 0.1;
   slide.addText(news.title || '', {
     x: innerX, y: curY, w: innerW, h: titleH,
@@ -408,9 +411,7 @@ function addKMNCard(slide, news, category, x, y, w, h) {
   });
   curY += titleH + 0.04;
 
-  // Analysis: 4 sentences from summary_long, falling back to summary
   const analysisText = news.summary_long || news.summary || '';
-  // Split into sentences (simple heuristic on Korean periods)
   let sentences = analysisText.split(/(?<=[.。!?])\s+/).filter(s => s.trim().length > 0);
   if (sentences.length === 0) sentences = [analysisText];
 
@@ -418,7 +419,6 @@ function addKMNCard(slide, news, category, x, y, w, h) {
   const bodyTop = curY;
   const bodyH = (y + h) - bodyTop - footerReserve;
 
-  // Build paragraphs array
   const paragraphs = sentences.map((s, i) => ({
     text: '• ' + s.trim(),
     options: {
@@ -435,7 +435,6 @@ function addKMNCard(slide, news, category, x, y, w, h) {
     paraSpaceAfter: 2,
   });
 
-  // Footer
   const footerY = y + h - footerReserve + 0.06;
   slide.addShape('rect', {
     x: innerX, y: footerY - 0.04, w: innerW, h: 0.005,
@@ -500,14 +499,21 @@ function buildImplications(pres, insights) {
 // ===== Main handler =====
 export default async function handler(req, res) {
   const range = (req.query.range || 'week').toString();
+  const sector = (req.query.sector || 'ev').toString();
   const days = range === 'month' ? 30 : 7;
 
+  if (!['ev', 'cpo'].includes(sector)) {
+    return res.status(400).json({ error: 'Invalid sector. Use ev or cpo.' });
+  }
+
+  const sectorConfig = SECTOR_CONFIG[sector];
+
   try {
-    // Fetch articles within date range
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
     const { data: articles, error } = await supabase
       .from('news')
-      .select('country, title, summary, summary_long, category, source, source_url, pub_date')
+      .select('country, sector, title, summary, summary_long, category, source, source_url, pub_date')
+      .eq('sector', sector)
       .gte('pub_date', cutoff)
       .order('pub_date', { ascending: false })
       .limit(500);
@@ -522,7 +528,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // Compute stats
     const stats = {
       total: articles.length,
       byCountry: {},
@@ -535,7 +540,6 @@ export default async function handler(req, res) {
       }
     }
 
-    // Group by country (top 8 each, most recent first)
     const articlesByCountry = { korea: [], japan: [], us: [] };
     for (const a of articles) {
       if (articlesByCountry[a.country] && articlesByCountry[a.country].length < 8) {
@@ -543,14 +547,12 @@ export default async function handler(req, res) {
       }
     }
 
-    // For Claude analysis: send a manageable subset (24 most recent across countries)
     const analysisSet = [
       ...articlesByCountry.korea,
       ...articlesByCountry.japan,
       ...articlesByCountry.us,
     ];
 
-    // Determine date range labels
     const sortedByDate = [...articles].sort(
       (a, b) => new Date(a.pub_date) - new Date(b.pub_date)
     );
@@ -560,13 +562,11 @@ export default async function handler(req, res) {
     const weekEnd = formatDate(newest.pub_date);
     const periodLabel = `${weekStart} ~ ${weekEnd}`;
 
-    // Run Claude analysis
     let analysis;
     try {
-      analysis = await generateAnalysis(analysisSet, periodLabel);
+      analysis = await generateAnalysis(analysisSet, periodLabel, sectorConfig);
     } catch (e) {
       console.error('Claude analysis failed:', e);
-      // Fallback: pick first article per category, generic implications
       analysis = {
         highlights: analysisSet.slice(0, 3).map(a => a.title),
         category_picks: {},
@@ -574,14 +574,12 @@ export default async function handler(req, res) {
       };
     }
 
-    // Build category articles map
     const categoryArticles = {};
-    for (const cat of CATEGORIES) {
+    for (const cat of sectorConfig.categories) {
       const pickIdx = analysis.category_picks?.[cat];
       if (pickIdx && analysisSet[pickIdx - 1]) {
         categoryArticles[cat] = analysisSet[pickIdx - 1];
       } else {
-        // Fallback: find first article in this category
         categoryArticles[cat] = analysisSet.find(a => a.category === cat)
                               || analysisSet[0];
       }
@@ -589,21 +587,24 @@ export default async function handler(req, res) {
 
     // ===== Build PPT =====
     const pres = new pptxgen();
-    pres.layout = 'LAYOUT_WIDE'; // 13.333 x 7.5
+    pres.layout = 'LAYOUT_WIDE';
 
-    buildTitleSlide(pres, weekStart, weekEnd);
-    buildExecSummary(pres, stats, analysis.highlights || []);
-    buildAllArticlesIndex(pres, articlesByCountry);
-    buildKMNGrid(pres, categoryArticles);
+    const reportTitle = range === 'month'
+      ? sectorConfig.titleMonth
+      : sectorConfig.title;
+
+    buildTitleSlide(pres, weekStart, weekEnd, reportTitle);
+    buildExecSummary(pres, stats, analysis.highlights || [], sectorConfig);
+    buildAllArticlesIndex(pres, articlesByCountry, sectorConfig);
+    buildKMNGrid(pres, categoryArticles, sectorConfig);
     buildImplications(pres, analysis.implications || []);
 
-    // Generate buffer
     const buffer = await pres.write({ outputType: 'nodebuffer' });
 
-    // Filename
     const today = formatDate(new Date());
+    const sectorLabel = sector === 'cpo' ? 'CPO' : 'EV';
     const rangeSuffix = range === 'month' ? '30days' : '7days';
-    const filename = `EV-Daily-Report_${today}_${rangeSuffix}.pptx`;
+    const filename = `${sectorLabel}-Report_${today}_${rangeSuffix}.pptx`;
 
     res.setHeader('Content-Type',
       'application/vnd.openxmlformats-officedocument.presentationml.presentation');
