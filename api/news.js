@@ -1,23 +1,86 @@
-2026-05-07 14:50:25.996 [info] [cpo/korea] saved 8 records
-2026-05-07 14:50:26.452 [info] [cpo/japan] saved 8 records
-2026-05-07 14:50:04.807 [info] [ev/korea] fetching feeds...
-2026-05-07 14:50:04.823 [info] [ev/japan] fetching feeds...
-2026-05-07 14:50:04.825 [info] [ev/us] fetching feeds...
-2026-05-07 14:50:04.829 [info] [cpo/korea] fetching feeds...
-2026-05-07 14:50:04.838 [info] [cpo/japan] fetching feeds...
-2026-05-07 14:50:04.840 [info] [cpo/us] fetching feeds...
-2026-05-07 14:50:04.841 [info] [tech/global] fetching feeds...
-2026-05-07 14:50:05.063 [error] (node:4) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
-2026-05-07 14:50:27.486 [info] [ev/korea] saved 8 records
-2026-05-07 14:50:29.959 [info] [ev/japan] saved 8 records
-2026-05-07 14:50:30.386 [info] [cpo/us] saved 8 records
-2026-05-07 14:50:30.835 [info] [tech/global] saved 8 records
-2026-05-07 14:50:32.733 [info] [ev/us] saved 8 records
-2026-05-07 14:50:32.733 [info] Cron run summary: [{"sector":"ev","country":"korea","saved":8},{"sector":"ev","country":"japan","saved":8},{"sector":"ev","country":"us","saved":8},{"sector":"cpo","country":"korea","saved":8},{"sector":"cpo","country":"japan","saved":8},{"sector":"cpo","country":"us","saved":8},{"sector":"tech","country":"global","saved":8}]
-2026-05-07 14:50:05.376 [info] [cpo/japan] got 200 raw items
-2026-05-07 14:50:05.440 [info] [ev/japan] got 200 raw items
-2026-05-07 14:50:05.476 [info] [ev/korea] got 200 raw items
-2026-05-07 14:50:05.522 [info] [cpo/korea] got 200 raw items
-2026-05-07 14:50:05.702 [info] [tech/global] got 565 raw items
-2026-05-07 14:50:05.721 [info] [cpo/us] got 200 raw items
-2026-05-07 14:50:05.740 [info] [ev/us] got 265 raw items
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_ANON_KEY
+);
+
+const VALID_TECH_TAGS = [
+  'fast_charging', 'mcs', 'wireless', 'v2x',
+  'standard', 'ai_management', 'payment', 'battery',
+];
+
+export default async function handler(req, res) {
+  const sector = (req.query.sector || 'ev').toString();
+  const country = (req.query.country || '').toString();
+  const techTag = (req.query.tech_tag || '').toString();
+
+  const validSectors = ['ev', 'cpo', 'tech'];
+  const validCountries = ['korea', 'japan', 'us', 'global'];
+
+  if (!validSectors.includes(sector)) {
+    return res.status(400).json({
+      error: 'Invalid sector. Use ev, cpo, or tech.',
+    });
+  }
+
+  // For tech sector: country defaults to 'global'
+  // For ev/cpo: country must be specified and valid
+  let effectiveCountry;
+  if (sector === 'tech') {
+    effectiveCountry = 'global';
+  } else {
+    if (!validCountries.includes(country) || country === 'global') {
+      return res.status(400).json({
+        error: 'Invalid country. Use korea, japan, or us.',
+      });
+    }
+    effectiveCountry = country;
+  }
+
+  // Validate tech_tag if provided (only relevant for tech sector)
+  if (techTag && !VALID_TECH_TAGS.includes(techTag)) {
+    return res.status(400).json({
+      error: `Invalid tech_tag. Allowed: ${VALID_TECH_TAGS.join(', ')}`,
+    });
+  }
+
+  try {
+    let query = supabase
+      .from('news')
+      .select(
+        'id, country, sector, tech_tag, title, summary, summary_long, category, source, source_url, pub_date'
+      )
+      .eq('sector', sector)
+      .eq('country', effectiveCountry)
+      .order('pub_date', { ascending: false })
+      .limit(100);
+
+    // Apply tech_tag filter if provided
+    if (sector === 'tech' && techTag) {
+      query = query.eq('tech_tag', techTag);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('news DB error:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.setHeader(
+      'Cache-Control',
+      'public, s-maxage=300, stale-while-revalidate=60'
+    );
+    res.status(200).json({
+      sector,
+      country: effectiveCountry,
+      tech_tag: techTag || null,
+      count: data?.length || 0,
+      items: data || [],
+    });
+  } catch (e) {
+    console.error('news handler failed:', e);
+    res.status(500).json({ error: e.message });
+  }
+}
