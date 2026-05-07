@@ -6,25 +6,52 @@ const supabase = createClient(
 );
 
 export default async function handler(req, res) {
-  const country = (req.query.country || 'korea').toString();
-  const allowed = ['korea', 'japan', 'us'];
+  const country = (req.query.country || '').toString();
+  const sector = (req.query.sector || 'ev').toString();
 
-  if (!allowed.includes(country)) {
-    return res.status(400).json({ error: 'Invalid country' });
+  // Validate inputs
+  const validCountries = ['korea', 'japan', 'us'];
+  const validSectors = ['ev', 'cpo'];
+
+  if (!validCountries.includes(country)) {
+    return res.status(400).json({
+      error: 'Invalid country. Use korea, japan, or us.',
+    });
+  }
+  if (!validSectors.includes(sector)) {
+    return res.status(400).json({
+      error: 'Invalid sector. Use ev or cpo.',
+    });
   }
 
-  const { data, error } = await supabase
-    .from('news')
-    .select('id, country, title, summary, category, source, source_url, pub_date, original_title')
-    .eq('country', country)
-    .order('pub_date', { ascending: false })
-    .limit(15);
+  try {
+    const { data, error } = await supabase
+      .from('news')
+      .select(
+        'id, country, sector, title, summary, summary_long, category, source, source_url, pub_date'
+      )
+      .eq('country', country)
+      .eq('sector', sector)
+      .order('pub_date', { ascending: false })
+      .limit(50);
 
-  if (error) {
-    return res.status(500).json({ error: error.message });
+    if (error) {
+      console.error('news DB error:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.setHeader(
+      'Cache-Control',
+      'public, s-maxage=300, stale-while-revalidate=60'
+    );
+    res.status(200).json({
+      country,
+      sector,
+      count: data?.length || 0,
+      items: data || [],
+    });
+  } catch (e) {
+    console.error('news handler failed:', e);
+    res.status(500).json({ error: e.message });
   }
-
-  // Cache for 5 min on edge, allow stale-while-revalidate for 10 min
-  res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=300, stale-while-revalidate=600');
-  res.status(200).json({ items: data || [] });
 }
