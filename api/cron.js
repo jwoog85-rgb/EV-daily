@@ -11,62 +11,99 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
-function buildGoogleNewsUrl(sites, keywords, locale) {
-  const sitesQuery = sites.map((s) => `site:${s}`).join(' OR ');
-  const fullQuery = `(${sitesQuery}) (${keywords})`;
-  return `https://news.google.com/rss/search?q=${encodeURIComponent(fullQuery)}&${locale}`;
+function buildGoogleNewsUrl(query, locale) {
+  return `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&${locale}`;
 }
 
-const FEEDS = {
+function buildSiteFiltered(sites, keywords, locale) {
+  const sitesQuery = sites.map((s) => `site:${s}`).join(' OR ');
+  return buildGoogleNewsUrl(`(${sitesQuery}) (${keywords})`, locale);
+}
+
+// ===== Sector configs =====
+
+// EV sector — same as before
+const EV_FEEDS = {
   korea: {
-    lang: 'ko',
-    langName: 'Korean',
+    lang: 'ko', langName: 'Korean',
     urls: [
-      buildGoogleNewsUrl(
+      buildSiteFiltered(
         ['etnews.com', 'hankyung.com', 'mk.co.kr', 'mt.co.kr', 'biz.chosun.com'],
         '전기차 OR EV OR 배터리 OR 충전',
-        'hl=ko&gl=KR&ceid=KR:ko'
-      ),
-      buildGoogleNewsUrl(
+        'hl=ko&gl=KR&ceid=KR:ko'),
+      buildSiteFiltered(
         ['edaily.co.kr', 'fnnews.com', 'sedaily.com', 'thebell.co.kr'],
         '전기차 OR EV OR 배터리',
-        'hl=ko&gl=KR&ceid=KR:ko'
-      ),
+        'hl=ko&gl=KR&ceid=KR:ko'),
     ],
   },
   japan: {
-    lang: 'ja',
-    langName: 'Japanese',
+    lang: 'ja', langName: 'Japanese',
     urls: [
-      buildGoogleNewsUrl(
+      buildSiteFiltered(
         ['response.jp', 'car.watch.impress.co.jp', 'nikkei.com', 'itmedia.co.jp'],
         '電気自動車 OR EV OR バッテリー OR 充電',
-        'hl=ja&gl=JP&ceid=JP:ja'
-      ),
-      buildGoogleNewsUrl(
+        'hl=ja&gl=JP&ceid=JP:ja'),
+      buildSiteFiltered(
         ['carview.yahoo.co.jp', 'autocar.jp', 'kuruma-news.jp', 'webcg.net'],
         '電気自動車 OR EV OR バッテリー',
-        'hl=ja&gl=JP&ceid=JP:ja'
-      ),
+        'hl=ja&gl=JP&ceid=JP:ja'),
     ],
   },
   us: {
-    lang: 'en',
-    langName: 'English',
+    lang: 'en', langName: 'English',
     urls: [
       'https://electrek.co/feed/',
       'https://insideevs.com/rss/articles/all/',
       'https://cleantechnica.com/feed/',
-      buildGoogleNewsUrl(
+      buildSiteFiltered(
         ['theverge.com', 'reuters.com', 'bloomberg.com', 'wsj.com', 'cnbc.com'],
         'electric vehicle OR EV OR battery',
-        'hl=en&gl=US&ceid=US:en'
-      ),
+        'hl=en&gl=US&ceid=US:en'),
     ],
   },
 };
 
-const CATEGORIES = ['국내 완성차', '해외 완성차', '배터리', '충전 인프라', '정책', '시장 동향'];
+// CPO sector — Charging Point Operator companies
+const CPO_FEEDS = {
+  korea: {
+    lang: 'ko', langName: 'Korean',
+    // Step 1: company-name searches (priority)
+    urls: [
+      buildGoogleNewsUrl(
+        '"GS차지비" OR "채비" OR "파워큐브" OR "에버온" OR "SK일렉링크" OR "이브이시스" OR "EVSIS" OR "한국전기차충전서비스" OR "볼트업"',
+        'hl=ko&gl=KR&ceid=KR:ko'),
+      buildGoogleNewsUrl(
+        '"플러그링크" OR "Pluglink" OR "휴맥스이브이" OR "스타코프" OR "차지인" OR "전기차 충전사업자" OR "충전소 사업"',
+        'hl=ko&gl=KR&ceid=KR:ko'),
+    ],
+  },
+  japan: {
+    lang: 'ja', langName: 'Japanese',
+    urls: [
+      buildGoogleNewsUrl(
+        '"e-Mobility Power" OR "eMP" OR "ENECHANGE" OR "Tesla Japan" OR "Terra Charge" OR "Terra Motors" OR "PowerX"',
+        'hl=ja&gl=JP&ceid=JP:ja'),
+      buildGoogleNewsUrl(
+        '"Plugo" OR "EneGate" OR "Jigowatts" OR "bp pulse Japan" OR "MC Retail Energy" OR "充電サービス" OR "EV充電 事業者"',
+        'hl=ja&gl=JP&ceid=JP:ja'),
+    ],
+  },
+  us: {
+    lang: 'en', langName: 'English',
+    urls: [
+      buildGoogleNewsUrl(
+        '"Tesla Supercharger" OR "ChargePoint" OR "Electrify America" OR "EVgo" OR "Blink Charging"',
+        'hl=en&gl=US&ceid=US:en'),
+      buildGoogleNewsUrl(
+        '"EV Connect" OR "Ionna" OR "Shell Recharge" OR "bp pulse" OR "FLO" charging OR "EV charging operator" OR "charging network"',
+        'hl=en&gl=US&ceid=US:en'),
+    ],
+  },
+};
+
+const EV_CATEGORIES = ['국내 완성차', '해외 완성차', '배터리', '충전 인프라', '정책', '시장 동향'];
+const CPO_CATEGORIES = ['사업 확장', '기술·제품', '제휴·파트너십', '요금·서비스', '투자·M&A', '정책·규제'];
 
 function extractSource(title) {
   const m = title.match(/ - ([^-]{2,40})$/);
@@ -90,19 +127,20 @@ async function fetchFeeds(urls) {
   return items;
 }
 
-async function processCountry(country) {
-  const conf = FEEDS[country];
-  console.log(`[${country}] fetching feeds...`);
+async function processSegment(sector, country, feedsConfig, categories, sectorContext) {
+  const conf = feedsConfig[country];
+  console.log(`[${sector}/${country}] fetching feeds...`);
   const rawItems = await fetchFeeds(conf.urls);
-  console.log(`[${country}] got ${rawItems.length} raw items`);
+  console.log(`[${sector}/${country}] got ${rawItems.length} raw items`);
 
-  if (rawItems.length === 0) return { country, saved: 0 };
+  if (rawItems.length === 0) return { sector, country, saved: 0 };
 
   rawItems.sort(
     (a, b) =>
       new Date(b.pubDate || b.isoDate || 0) - new Date(a.pubDate || a.isoDate || 0)
   );
 
+  // Dedupe by link
   const seen = new Set();
   const deduped = rawItems.filter((item) => {
     const key = item.link;
@@ -112,6 +150,7 @@ async function processCountry(country) {
   });
 
   const top = deduped.slice(0, 8);
+  if (top.length === 0) return { sector, country, saved: 0 };
 
   const itemsText = top
     .map((item, i) => {
@@ -122,7 +161,7 @@ async function processCountry(country) {
     })
     .join('\n\n');
 
-  const prompt = `You are processing ${conf.langName} EV/automotive news for a Korean news app and analytical archive.
+  const prompt = `You are processing ${conf.langName} ${sectorContext} news for a Korean news app and analytical archive.
 
 For each numbered item, output:
 - title_ko: Concise Korean title (translate if needed; if already Korean, polish)
@@ -131,15 +170,14 @@ For each numbered item, output:
   Sentence 1: Core fact - what happened
   Sentence 2: Specific details, numbers, or technical specs mentioned
   Sentence 3: Market context - related companies, competing products, or industry trend
-  Sentence 4: Implication - why this matters for the EV industry going forward
-- category: ONE of: ${CATEGORIES.join(' / ')}
+  Sentence 4: Implication - why this matters for the industry going forward
+- category: ONE of: ${categories.join(' / ')}
 
 Rules:
-- Keep brand/company/people names in original Latin form (Tesla, Toyota, Hyundai, BYD, Rivian, etc.)
+- Keep brand/company/people names in original Latin form (Tesla, Toyota, ChargePoint, EVgo, etc.)
 - Convert Japanese katakana brand names to Latin (テスラ → Tesla)
 - Korean must be natural, news-style, not literal translation
 - summary_ko: 2 sentences exactly. summary_long_ko: 4 sentences exactly.
-- For summary_long_ko, draw on your knowledge of the EV industry to add useful context
 
 Items:
 ${itemsText}
@@ -158,7 +196,7 @@ Output a JSON array of exactly ${top.length} objects with keys (title_ko, summar
   try {
     processed = JSON.parse(text);
   } catch (e) {
-    console.error(`[${country}] JSON parse failed. Response preview:`, text.slice(0, 300));
+    console.error(`[${sector}/${country}] JSON parse failed. Response preview:`, text.slice(0, 300));
     throw e;
   }
 
@@ -167,6 +205,7 @@ Output a JSON array of exactly ${top.length} objects with keys (title_ko, summar
       const p = processed[i];
       if (!p) return null;
       return {
+        sector,
         country,
         title: p.title_ko,
         summary: p.summary_ko,
@@ -185,12 +224,12 @@ Output a JSON array of exactly ${top.length} objects with keys (title_ko, summar
     .upsert(records, { onConflict: 'source_url', ignoreDuplicates: false });
 
   if (error) {
-    console.error(`[${country}] supabase error:`, error);
+    console.error(`[${sector}/${country}] supabase error:`, error);
     throw new Error(error.message);
   }
 
-  console.log(`[${country}] saved ${records.length} records`);
-  return { country, saved: records.length };
+  console.log(`[${sector}/${country}] saved ${records.length} records`);
+  return { sector, country, saved: records.length };
 }
 
 export default async function handler(req, res) {
@@ -200,16 +239,27 @@ export default async function handler(req, res) {
   }
 
   try {
-    const results = await Promise.allSettled([
-      processCountry('korea'),
-      processCountry('japan'),
-      processCountry('us'),
-    ]);
+    const tasks = [
+      // EV sector
+      processSegment('ev', 'korea', EV_FEEDS, EV_CATEGORIES, 'EV/automotive'),
+      processSegment('ev', 'japan', EV_FEEDS, EV_CATEGORIES, 'EV/automotive'),
+      processSegment('ev', 'us', EV_FEEDS, EV_CATEGORIES, 'EV/automotive'),
+      // CPO sector
+      processSegment('cpo', 'korea', CPO_FEEDS, CPO_CATEGORIES, 'EV charging operator (CPO)'),
+      processSegment('cpo', 'japan', CPO_FEEDS, CPO_CATEGORIES, 'EV charging operator (CPO)'),
+      processSegment('cpo', 'us', CPO_FEEDS, CPO_CATEGORIES, 'EV charging operator (CPO)'),
+    ];
+
+    const results = await Promise.allSettled(tasks);
 
     const summary = results.map((r, i) => {
-      const country = ['korea', 'japan', 'us'][i];
+      const sectorList = ['ev', 'ev', 'ev', 'cpo', 'cpo', 'cpo'];
+      const countryList = ['korea', 'japan', 'us', 'korea', 'japan', 'us'];
       if (r.status === 'fulfilled') return r.value;
-      return { country, error: r.reason?.message || 'unknown error' };
+      return {
+        sector: sectorList[i], country: countryList[i],
+        error: r.reason?.message || 'unknown error',
+      };
     });
 
     console.log('Cron run summary:', JSON.stringify(summary));
