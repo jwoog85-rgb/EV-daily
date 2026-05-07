@@ -12,6 +12,11 @@ const COUNTRY_LABELS = {
   us: '미국',
 };
 
+const SECTOR_LABELS = {
+  ev: 'EV',
+  cpo: 'CPO',
+};
+
 function formatDate(d) {
   if (!d) return '';
   const date = new Date(d);
@@ -34,16 +39,23 @@ function formatDateOnly(d) {
 
 export default async function handler(req, res) {
   const range = (req.query.range || 'week').toString();
-  const allowed = ['week', 'month', 'all'];
+  const sector = (req.query.sector || 'ev').toString();
 
-  if (!allowed.includes(range)) {
+  const allowedRanges = ['week', 'month', 'all'];
+  const allowedSectors = ['ev', 'cpo'];
+
+  if (!allowedRanges.includes(range)) {
     return res.status(400).json({ error: 'Invalid range. Use week, month, or all.' });
   }
+  if (!allowedSectors.includes(sector)) {
+    return res.status(400).json({ error: 'Invalid sector. Use ev or cpo.' });
+  }
 
-  // Build date filter
+  // Build query
   let query = supabase
     .from('news')
-    .select('country, title, summary, summary_long, category, source, source_url, pub_date, original_title')
+    .select('country, sector, title, summary, summary_long, category, source, source_url, pub_date, original_title')
+    .eq('sector', sector)
     .order('pub_date', { ascending: false });
 
   if (range === 'week') {
@@ -53,9 +65,7 @@ export default async function handler(req, res) {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     query = query.gte('pub_date', thirtyDaysAgo);
   }
-  // 'all' = no date filter
 
-  // Set a high limit; Supabase default is 1000
   query = query.limit(10000);
 
   const { data, error } = await query;
@@ -110,15 +120,17 @@ export default async function handler(req, res) {
   }
 
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'EV News');
+  const sheetName = sector === 'cpo' ? 'CPO News' : 'EV News';
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
 
   // Generate buffer
   const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
   // Generate filename
   const today = formatDateOnly(new Date());
+  const sectorLabel = SECTOR_LABELS[sector];
   const rangeSuffix = range === 'week' ? '7days' : range === 'month' ? '30days' : 'all';
-  const filename = `EV-Daily_${today}_${rangeSuffix}.xlsx`;
+  const filename = `EV-Daily_${sectorLabel}_${today}_${rangeSuffix}.xlsx`;
 
   res.setHeader(
     'Content-Type',
