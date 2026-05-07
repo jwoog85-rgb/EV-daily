@@ -30,6 +30,11 @@
   <script type="text/babel" data-presets="react">
     const { useState, useEffect } = React;
 
+    const SECTORS = [
+      { key: 'ev', label: 'EV 뉴스', sub: 'Electric Vehicles' },
+      { key: 'cpo', label: 'CPO 뉴스', sub: 'Charging Operators' },
+    ];
+
     const COUNTRIES = [
       { key: 'korea', label: '한국', sub: 'KR' },
       { key: 'japan', label: '일본', sub: 'JP' },
@@ -73,7 +78,9 @@
     }
 
     function EVNewsApp() {
+      const [sector, setSector] = useState('ev');
       const [country, setCountry] = useState('korea');
+      // cache key: `${sector}:${country}`
       const [cache, setCache] = useState({});
       const [loading, setLoading] = useState(false);
       const [error, setError] = useState(null);
@@ -86,15 +93,16 @@
         year: 'numeric', month: 'long', day: 'numeric', weekday: 'long',
       });
 
-      async function loadNews(targetCountry, force = false) {
-        if (!force && cache[targetCountry]) return;
+      async function loadNews(targetSector, targetCountry, force = false) {
+        const key = `${targetSector}:${targetCountry}`;
+        if (!force && cache[key]) return;
         setLoading(true);
         setError(null);
         try {
-          const res = await fetch(`/api/news?country=${targetCountry}`);
+          const res = await fetch(`/api/news?country=${targetCountry}&sector=${targetSector}`);
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const data = await res.json();
-          setCache((prev) => ({ ...prev, [targetCountry]: data.items || [] }));
+          setCache((prev) => ({ ...prev, [key]: data.items || [] }));
         } catch (e) {
           setError(e.message);
         } finally {
@@ -102,7 +110,7 @@
         }
       }
 
-      useEffect(() => { loadNews(country); }, [country]);
+      useEffect(() => { loadNews(sector, country); }, [sector, country]);
 
       // Close menus on outside click
       useEffect(() => {
@@ -127,7 +135,7 @@
       };
 
       const handleXlsxDownload = (range) => {
-        window.location.href = `/api/export?range=${range}`;
+        window.location.href = `/api/export?range=${range}&sector=${sector}`;
         setShowXlsxMenu(false);
       };
 
@@ -135,7 +143,7 @@
         setShowPptMenu(false);
         setPptLoading(true);
         try {
-          const res = await fetch(`/api/ppt?range=${range}`);
+          const res = await fetch(`/api/ppt?range=${range}&sector=${sector}`);
           if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || `HTTP ${res.status}`);
@@ -144,7 +152,7 @@
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           const filename = res.headers.get('Content-Disposition')
-            ?.match(/filename="(.+?)"/)?.[1] || `EV-Report-${range}.pptx`;
+            ?.match(/filename="(.+?)"/)?.[1] || `Report-${sector}-${range}.pptx`;
           a.href = url;
           a.download = filename;
           document.body.appendChild(a);
@@ -158,12 +166,13 @@
         }
       };
 
-      const allItems = cache[country] || [];
+      const cacheKey = `${sector}:${country}`;
+      const allItems = cache[cacheKey] || [];
       const items = allItems.filter((n) => {
         if (!n.pub_date) return true;
         return Date.now() - new Date(n.pub_date).getTime() < SEVEN_DAYS_MS;
       });
-      const feed = COUNTRIES.find((c) => c.key === country);
+      const currentSector = SECTORS.find((s) => s.key === sector);
 
       return (
         <div className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -190,14 +199,33 @@
               </p>
             </header>
 
+            {/* Sector toggle */}
             <div className="px-5 pt-4 pb-3 border-b border-zinc-900">
-              <div className="grid grid-cols-3 gap-1 bg-zinc-900 rounded-xl p-1">
+              <div className="grid grid-cols-2 gap-1 bg-zinc-900 rounded-xl p-1">
+                {SECTORS.map((s) => (
+                  <button
+                    key={s.key}
+                    onClick={() => setSector(s.key)}
+                    className={`py-3 rounded-lg text-sm font-bold transition-all ${
+                      sector === s.key ? 'bg-lime-400 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    <div>{s.label}</div>
+                    <div className="font-mono text-[9px] tracking-widest opacity-60 mt-0.5 uppercase">{s.sub}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Country tabs */}
+            <div className="px-5 pt-3 pb-3 border-b border-zinc-900">
+              <div className="grid grid-cols-3 gap-1 bg-zinc-900/50 rounded-xl p-1">
                 {COUNTRIES.map((f) => (
                   <button
                     key={f.key}
                     onClick={() => setCountry(f.key)}
-                    className={`py-2.5 rounded-lg text-sm font-semibold transition-all ${
-                      country === f.key ? 'bg-lime-400 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'
+                    className={`py-2 rounded-lg text-xs font-semibold transition-all ${
+                      country === f.key ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
                     }`}
                   >
                     <div>{f.label}</div>
@@ -208,10 +236,10 @@
             </div>
 
             <div className="px-5 py-3 flex items-center justify-between text-[11px] font-mono uppercase tracking-wider text-zinc-500 border-b border-zinc-900">
-              <span>{loading ? '불러오는 중...' : `${items.length}건 · 최근 7일`}</span>
+              <span>{loading ? '불러오는 중...' : `${items.length}건 · 최근 7일 · ${currentSector.label}`}</span>
               <div className="flex items-center gap-3 relative">
                 <button
-                  onClick={() => loadNews(country, true)}
+                  onClick={() => loadNews(sector, country, true)}
                   disabled={loading}
                   className="text-lime-400 hover:text-lime-300 disabled:opacity-50"
                 >↻ 새로고침</button>
@@ -232,8 +260,11 @@
                 {showXlsxMenu && (
                   <div
                     onClick={(e) => e.stopPropagation()}
-                    className="absolute right-0 top-7 z-10 w-44 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden"
+                    className="absolute right-0 top-7 z-10 w-48 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden"
                   >
+                    <div className="px-4 py-2 text-[10px] text-zinc-500 border-b border-zinc-800 bg-zinc-950">
+                      {currentSector.label} 엑셀
+                    </div>
                     <button
                       onClick={() => handleXlsxDownload('week')}
                       className="w-full px-4 py-3 text-left text-xs font-medium text-zinc-200 hover:bg-zinc-800 normal-case tracking-normal"
@@ -261,10 +292,10 @@
                 {showPptMenu && (
                   <div
                     onClick={(e) => e.stopPropagation()}
-                    className="absolute right-0 top-7 z-10 w-48 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden"
+                    className="absolute right-0 top-7 z-10 w-52 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden"
                   >
                     <div className="px-4 py-2 text-[10px] text-zinc-500 border-b border-zinc-800 bg-zinc-950">
-                      임원 보고용 5장 리포트
+                      {currentSector.label} 임원 보고용 5장 리포트
                     </div>
                     <button
                       onClick={() => handlePptDownload('week')}
@@ -305,7 +336,7 @@
               <div className="mx-5 my-6 p-4 border border-red-900/50 bg-red-950/30 rounded-lg">
                 <p className="text-sm text-red-400 mb-2">불러오기 실패</p>
                 <p className="text-xs text-zinc-500 font-mono">{error}</p>
-                <button onClick={() => loadNews(country, true)} className="mt-3 text-xs px-3 py-1.5 rounded-full bg-zinc-900 border border-zinc-800">다시 시도</button>
+                <button onClick={() => loadNews(sector, country, true)} className="mt-3 text-xs px-3 py-1.5 rounded-full bg-zinc-900 border border-zinc-800">다시 시도</button>
               </div>
             )}
 
@@ -322,7 +353,7 @@
                   <article key={news.id} className="px-5 py-6 hover:bg-zinc-900/40 transition-colors">
                     <div className="flex items-start justify-between gap-3 mb-3">
                       <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-wider min-w-0">
-                        <span className="text-lime-400 truncate">{news.category || 'EV'}</span>
+                        <span className="text-lime-400 truncate">{news.category || '뉴스'}</span>
                       </div>
                       <span className="font-mono text-[10px] text-zinc-600 whitespace-nowrap">{formatRelativeTime(news.pub_date)}</span>
                     </div>
